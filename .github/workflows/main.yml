@@ -3,9 +3,15 @@ on:
   #push:
     #branches: 
       #- main
+  ## This triggers the workflow when a pull request is opened, synchronized, or reopened against the main branch. It allows you to run tests and checks on the code changes before they are merged into the main branch.
   pull_request:
     branches:
       - main
+  ## Allows manual triggering of the workflow from the GitHub Actions tab    
+  workflow_dispatch:
+## Permissions for the workflow
+permissions:
+  contents: read
 
 jobs:
   Build:
@@ -14,11 +20,21 @@ jobs:
       - name: Code checkout
         uses: actions/checkout@v5
         with:
+        ## This ensures that the full commit history is available, which can be useful for certain build tools and for generating changelogs or release notes.
           fetch-depth: 0
 
       - name: Maven Build
         run: mvn install
 
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: vprofile-app
+          path: target/*.war
+
+      - name: notify if the build fails
+        if: failure()
+        run: echo "Build failed! Please check the logs for details."
 
   Testing:
     runs-on: ubuntu-latest
@@ -28,7 +44,13 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run tests on main branch
+        if: github.ref == 'refs/heads/main'
         run: mvn test
 
       - name: Checkstyle
+        if : github.ref == 'refs/heads/main'
         run: mvn checkstyle:checkstyle
+
+      - name: Run test on other branches
+        if: github.ref != 'refs/heads/main'
+        run: echo "Tests are only run on the main branch. Skipping tests for this branch."
