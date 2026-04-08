@@ -10,4 +10,4 @@ CMD ["catalina.sh", "run"]
 WORKDIR /usr/local/tomcat/
 VOLUME /usr/local/tomcat/webapps
 
-####
+####### To build the Docker image, run the following command in the terminal:
