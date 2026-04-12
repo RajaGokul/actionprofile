@@ -1,44 +1,46 @@
-name: Build Job
+name: Vprofile CICD Workflow
 on: 
-  #push:
-    #branches: 
-      #- main
-  ## This triggers the workflow when a pull request is opened, synchronized, or reopened against the main branch. It allows you to run tests and checks on the code changes before they are merged into the main branch.
-  pull_request:
-    branches:
+  push:
+    branches: 
       - main
-  ## Allows manual triggering of the workflow from the GitHub Actions tab    
+
+  pull_request:
+    branches: 
+      - main
+
   workflow_dispatch:
-## Permissions for the workflow
-permissions:
-  contents: read
+
+  schedule:
+    - cron: "10 14 * * 1-5"   # After noon 2:10 pm, Mondat to Friday
 
 env:
- ECR_REPOSITORY: 'vprofile-appimage'
+  ECR_REPOSITORY: 'vprofile-appimage'
+  
+permissions: 
+  contents: read
 
 jobs:
   Build:
     runs-on: ubuntu-latest
     steps:
-      # This step checks out the code from the repository so that it can be built and tested in subsequent steps.
       - name: Code checkout
         uses: actions/checkout@v5
         with:
-        ## This ensures that the full commit history is available, which can be useful for certain build tools and for generating changelogs or release notes.
           fetch-depth: 0
 
       - name: Maven Build
         run: mvn install
 
-      - name: Upload artifact
+      - name: Upload Build Artifact (WAR)
         uses: actions/upload-artifact@v4
         with:
           name: vprofile-app
           path: target/*.war
 
-      - name: notify if the build fails
+      - name: Notify if Build Fails
         if: failure()
-        run: echo "Build failed! Please check the logs for details."
+        run: echo "🚨 Build job failed! Please check logs."
+
 
   Testing:
     runs-on: ubuntu-latest
@@ -46,61 +48,65 @@ jobs:
     steps:
       - name: Code checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Run tests on main branch
         if: github.ref == 'refs/heads/main'
         run: mvn test
 
       - name: Checkstyle
-        if : github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main'
         run: mvn checkstyle:checkstyle
 
-      - name: Run test on other branches
+      - name: Run tests on other branches
         if: github.ref != 'refs/heads/main'
-        run: echo "Tests are only run on the main branch. Skipping tests for this branch."
+        run: echo "Skipping unit tests and code analysis"
 
-  Security-Scan:
+  Security_Scan:
     runs-on: ubuntu-latest
     needs: Build
     steps:
       - name: Code checkout
         uses: actions/checkout@v4
-
-      - name: Run Trivy security scan
-        uses: aquasecurity/trivy-action@master
         with:
-          scan-type: 'fs'
-          scan-ref: .
-          format: 'json'
-          exit-code: '0'
-          vuln-type: 'os,library'
-          severity: 'CRITICAL,HIGH'
-          output: 'results.json'
+          fetch-depth: 0
 
-      - name: Upload trivy scan results
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: json
+          exit-code: 0
+          vuln-type: os,library
+          output: trivy-results.json
+
+      - name: Upload Trivy scan results as artifact
         uses: actions/upload-artifact@v4
         with:
           name: trivy-scan-results
-          path: results.json
-  
-  build-and-push-docker-image:
+          path: trivy-results.json
+
+  BUILD_AND_PUBLISH:
+    name: BUILD_AND_PUBLISH
     runs-on: ubuntu-latest
-    environment: dev
-    needs: [Build, Testing, Security-Scan]
-    if : github.ref == 'refs/heads/main'
+    environment: production
+    needs: [Build, Testing, Security_Scan]
+    if: github.ref == 'refs/heads/main'
     steps:
       - name: Code checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
-        # This step configures the AWS credentials needed to authenticate with Amazon ECR (Elastic Container Registry) and perform actions such as pushing Docker images. The credentials are securely stored in GitHub Secrets and accessed using the secrets context.
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ vars.AWS_REGION }}
-          
+
       - name: Login to Amazon ECR
         id: login-ecr 
         uses: aws-actions/amazon-ecr-login@v2
@@ -113,5 +119,4 @@ jobs:
         run: |
           docker build -f Docker-files/app/multistage/Dockerfile -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-
-
+        
